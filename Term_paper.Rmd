@@ -1,0 +1,93 @@
+
+#Set-Up
+```{r}
+library(tidyverse)
+library(haven)
+library(panelr)
+library(plm)
+library(stargazer)
+```
+
+##Import Data
+```{r}
+data_raw <- read_dta("SLID_93_94.dta")
+```
+
+##Format Data
+```{r}
+long_data <- data_raw %>% 
+  select(elgw26b, elgw26c, nwpfm27b, nwpfm27c, regre25b, regre25c, marst26b, marst26c,
+         dwlty25b, dwlty25c, dwten25b, dwten25c, fmsz27b, fmsz27c, atinc27b, atinc27c,
+         nbemp27b, nbemp27c, eage26b, eage26c) %>% 
+  rename(weight_1 = elgw26b, weight_2 = elgw26c, new_fam_1 = nwpfm27b, new_fam_2 = nwpfm27c,
+         region_1 = regre25b, region_2 = regre25c, dwelling_1 = dwlty25b, dwelling_2 = dwlty25c,
+         own_1 = dwten25b, own_2 = dwten25c, fam_size_1 = fmsz27b, fam_size_2 = fmsz27c, 
+         income_1 = atinc27b, income_2 = atinc27c, married_1 = marst26b, married_2 = marst26c,
+         num_emp_1 = nbemp27b, num_emp_2 = nbemp27c, age_1 = eage26b, age_2 = eage26c) %>%
+  na.omit() %>% 
+  long_panel(prefix = "_", begin = 1, end = 2) %>% 
+  as.data.frame() %>% 
+  filter(age < 60)
+```
+
+##Dummy Variable Derivation
+```{r}
+data <- long_data %>% 
+  mutate(married = ifelse(married == 1, 1, 0),
+         region = factor(region),
+         new_fam = ifelse(new_fam == 1, 1, 0),
+         own = ifelse(own == 1, 1, 0),
+         dwelling = factor(dwelling))
+
+levels(data$region) <- list("Atlantic"=1, "Quebec"=2, "Ontario"=3, "Prairies"=4, "BC"=5)
+levels(data$dwelling) <- list("Detached" = 1, "Apartment"=2, "Semi-detached"=3, "Other"=4)
+```
+
+#Analysis
+
+##Model Estimation
+```{r}
+form <- new_fam ~ own + relevel(region, ref = "Ontario") + relevel(dwelling, ref = "Detached") + log(income+1) + married + num_emp + fam_size + I(fam_size^2) +
+I(fam_size^3)  + I(fam_size^4)
+
+pooled_model <- lm(form, data, weights = weight)
+fe_model <- plm(form, data, weights = weight, model = "within", index = c("id", "wave"))
+re_model <- plm(form, data, weights = weight, model = "random", index = c("id", "wave"))
+```
+
+##Model Summaries
+###Pooled Model
+```{r}
+summary(pooled_model)
+```
+###Fixed-Effects Model
+```{r}
+summary(fe_model)
+```
+###Random-Effects Model
+```{r}
+summary(re_model)
+```
+
+##Hausman Test
+```{r}
+hausman_test <- phtest(fe_model, re_model)
+hausman_test
+```
+
+#LaTex Table Generation
+```{r}
+summary_tab <- stargazer(data, keep = c("new_fam", "own", "income", "fam_size", "num_emp"),
+                         omit.summary.stat = c("n", "p25", "p75", "median"))
+regression_tab <- stargazer(fe_model)
+```
+
+```{r}
+u30_data <- data %>% 
+  filter(age >= 18 & age < 35) %>% 
+  mutate(new_fam = new_fam)
+u30_model <- plm(data = u30_data, formula = form, weights = weight,
+      model = "within", index = c("id", "wave"))
+summary(u30_model)
+```
+
